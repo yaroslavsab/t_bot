@@ -91,7 +91,7 @@ def handle_user_selection(call):
     for client in USERS[selected_user]:
         sanitized_data = sanitize_callback_data(f"client:{client}")
         markup.add(InlineKeyboardButton(client, callback_data=sanitized_data))
-    bot.send_message(chat_id, f"Користувач {selected_user} вибраний. Оберіть клієнта:", reply_markup=markup)
+    bot.send_message(chat_id, f"Напрямок {selected_user} вибраний. Оберіть клієнта:", reply_markup=markup)
 
 # Обробка вибору клієнта
 @bot.callback_query_handler(func=lambda call: call.data.startswith("client:"))
@@ -105,7 +105,7 @@ def handle_client_selection(call):
     # bot.send_message(chat_id, f"Клієнт {selected_client} вибраний. Тепер завантажте фото.")
       # Перевіряємо, чи існує запис для користувача
     if chat_id not in user_state or 'user' not in user_state[chat_id]:
-        bot.send_message(chat_id, "Будь ласка, спочатку оберіть торгового за допомогою команди /start.")
+        bot.send_message(chat_id, "Будь ласка, спочатку оберіть напрямок за допомогою команди /start.")
         return
 
     # Додаємо вибраного клієнта в стан користувача
