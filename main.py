@@ -6,6 +6,8 @@ import pandas as pd
 import re
 from telebot import apihelper
 import time 
+from datetime import datetime, timedelta
+import threading
 
 # Налаштування таймауту для всіх запитів
 apihelper.CONNECT_TIMEOUT = 30  # Таймаут підключення
@@ -48,6 +50,28 @@ os.makedirs(BASE_FOLDER, exist_ok=True)
 
 # Стан для кожного користувача
 user_state = {}
+last_interaction_time = {}  # Відстеження останньої взаємодії з ботом
+INACTIVITY_LIMIT = timedelta(hours=1)  # Часовий ліміт бездіяльності
+
+# Функція перевірки активності
+def check_inactivity():
+    while True:
+        now = datetime.now()
+        for chat_id in list(last_interaction_time.keys()):
+            if now - last_interaction_time[chat_id] > INACTIVITY_LIMIT:
+                del last_interaction_time[chat_id]  # Видалення користувача після закінчення часу
+                if chat_id in user_state:
+                    del user_state[chat_id]
+                try:
+                    bot.send_message(chat_id, "Час бездіяльності завершено. Натисніть /start, щоб почати заново.")
+                except Exception as e:
+                    print(f"Помилка надсилання повідомлення: {e}")
+        threading.Event().wait(60)  # Перевірка кожну хвилину
+
+# Запуск перевірки бездіяльності у фоновому потоці
+threading.Thread(target=check_inactivity, daemon=True).start()
+
+
 
 # Функція для санітизації callback_data
 def sanitize_callback_data(data):
@@ -57,6 +81,7 @@ def sanitize_callback_data(data):
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     chat_id = message.chat.id
+    last_interaction_time[chat_id] = datetime.now()  # Оновлення часу останньої взаємодії
     
     # Створюємо клавіатуру
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -69,7 +94,9 @@ def handle_start(message):
 @bot.message_handler(func=lambda message: message.text == "Вибрати напрямок")
 def handle_start_button(message):
     chat_id = message.chat.id
+    last_interaction_time[chat_id] = datetime.now()  # Оновлення часу останньої взаємодії
     
+
     # Показати список користувачів
     markup = InlineKeyboardMarkup()
     for user in USERS.keys():
@@ -82,6 +109,7 @@ def handle_start_button(message):
 def handle_user_selection(call):
     chat_id = call.message.chat.id
     selected_user = call.data.split(":")[1]
+    last_interaction_time[chat_id] = datetime.now()  # Оновлення часу останньої взаємодії
     
     # Збереження вибраного користувача
     user_state[chat_id] = {'user': selected_user}
@@ -97,6 +125,7 @@ def handle_user_selection(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("client:"))
 def handle_client_selection(call):
     chat_id = call.message.chat.id
+    last_interaction_time[chat_id] = datetime.now()  # Оновлення часу останньої взаємодії
     selected_client = call.data.split(":")[1]
     
     # # Збереження вибраного клієнта
@@ -117,6 +146,7 @@ def handle_client_selection(call):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
+    last_interaction_time[chat_id] = datetime.now()  # Оновлення часу останньої взаємоді
     state = user_state.get(chat_id, {})
     
     if 'user' not in state or 'client' not in state:
