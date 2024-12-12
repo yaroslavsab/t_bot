@@ -19,6 +19,12 @@ bot = telebot.TeleBot(API_TOKEN, parse_mode=None)
 
 
 
+def clean_folder_name(name):
+  #  """Функція для очищення імені папки"""
+    name = re.sub(r'[^\w\s]', '', name)  # Видалення некоректних символів
+    name = re.sub(r'\s+', ' ', name).strip()  # Заміна множинних пробілів на один
+    return name
+
 # Функція для очищення імен
 def sanitize_filename(name):
     # Видаляємо заборонені символи та зайві пробіли
@@ -313,13 +319,22 @@ def handle_photo(message):
         bot.send_message(chat_id, "Спочатку оберіть область, район та клієнта за допомогою кнопки 'Вибрати напрямок'.")
         return
 
-    selected_region = state['region']
-    selected_district = state['district']
-    selected_client = state['client']
+    # selected_region = state['region']
+    # selected_district = state['district']
+    # selected_client = state['client']
 
-    # Створення папки для області, району та клієнта
-    folder_path = os.path.join(BASE_FOLDER, selected_region, selected_district, selected_client)
+    # # Створення папки для області, району та клієнта
+    # folder_path = os.path.join(BASE_FOLDER, selected_region, selected_district, selected_client)
+    # os.makedirs(folder_path, exist_ok=True)
+
+    # Створення папки для користувача, клієнта та регіону
+    region = clean_folder_name(user_state[chat_id]['region'])
+    district = clean_folder_name(user_state[chat_id]['district'])
+    client = clean_folder_name(user_state[chat_id]['client'])
+
+    folder_path = os.path.join(BASE_FOLDER, region, district, client)
     os.makedirs(folder_path, exist_ok=True)
+
 
 
     #      # Отримуємо ім'я користувача
