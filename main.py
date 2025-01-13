@@ -1,13 +1,13 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InputMediaVideo
 import os
-from datetime import datetime
 import pandas as pd
 import re
 from telebot import apihelper
 import time 
 from datetime import datetime, timedelta
 import threading
+
 
 # Налаштування таймауту для всіх запитів
 apihelper.CONNECT_TIMEOUT = 30  # Таймаут підключення
@@ -35,7 +35,7 @@ def sanitize_filename(name):
 # USERS = load_clients_from_excel('clients.xls')  # Замість 'clients.xlsx' вкажіть свій шлях до файлу Excel
 
 # Дані з Excel
-EXCEL_FILE = 'clients.xls'  # Шлях до вашого файлу Excel
+EXCEL_FILE = r'E:\bot\clients.xls'  # Шлях до вашого файлу Excel
 
 # Функція для завантаження даних з Excel
 def load_clients_from_excel(file_path):
@@ -59,7 +59,7 @@ def load_clients_from_excel(file_path):
 CLIENTS = load_clients_from_excel(EXCEL_FILE)
 
 # Базова папка для збереження фото
-BASE_FOLDER = "user_client_photos"
+BASE_FOLDER = 'E:\\bot\\user_client_photos'
 os.makedirs(BASE_FOLDER, exist_ok=True)
 
 # Стан для кожного користувача
@@ -68,25 +68,44 @@ last_interaction_time = {}  # Відстеження останньої взає
 last_activity = {}
 INACTIVITY_LIMIT = timedelta(hours=1)  # Часовий ліміт бездіяльності
 
-# Функція перевірки активності
+# # Функція перевірки активності
+# def check_inactivity():
+#     while True:
+#         now = datetime.now()
+#         for chat_id in list(last_interaction_time.keys()):
+#             if now - last_interaction_time[chat_id] > INACTIVITY_LIMIT:
+#                 del last_interaction_time[chat_id]  # Видалення користувача після закінчення часу
+#                 if chat_id in user_state:
+#                     del user_state[chat_id]
+#                 try:
+#                     bot.send_message(chat_id, "Час бездіяльності завершено. Натисніть /start, щоб почати заново.")
+#                 except Exception as e:
+#                     print(f"Помилка надсилання повідомлення: {e}")
+#         threading.Event().wait(60)  # Перевірка кожну хвилину
+
+# # Запуск перевірки бездіяльності у фоновому потоці
+# threading.Thread(target=check_inactivity, daemon=True).start()
+
+# Функція для очищення історії і показу кнопки
+def reset_user(chat_id):
+    user_state.pop(chat_id, None)  # Очистити стан
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(KeyboardButton("Вибрати напрямок"))
+#    bot.send_message(chat_id, "Час бездіяльності закінчився. Натисніть 'Вибрати напрямок' для продовження.", reply_markup=markup)
+
+# Функція для перевірки бездіяльності
 def check_inactivity():
     while True:
         now = datetime.now()
-        for chat_id in list(last_interaction_time.keys()):
-            if now - last_interaction_time[chat_id] > INACTIVITY_LIMIT:
-                del last_interaction_time[chat_id]  # Видалення користувача після закінчення часу
-                if chat_id in user_state:
-                    del user_state[chat_id]
-                try:
-                    bot.send_message(chat_id, "Час бездіяльності завершено. Натисніть /start, щоб почати заново.")
-                except Exception as e:
-                    print(f"Помилка надсилання повідомлення: {e}")
-        threading.Event().wait(60)  # Перевірка кожну хвилину
+        for chat_id in list(last_activity.keys()):
+            if now - last_activity[chat_id] > INACTIVITY_LIMIT:
+                reset_user(chat_id)
+                last_activity.pop(chat_id, None)  # Видалити запис про активність
+        time.sleep(60)  # Перевіряти кожну хвилину
 
-# Запуск перевірки бездіяльності у фоновому потоці
+# Запустити перевірку бездіяльності в окремому потоці
+import time
 threading.Thread(target=check_inactivity, daemon=True).start()
-
-
 
 # Функція для санітизації callback_data
 def sanitize_callback_data(data):
@@ -105,6 +124,8 @@ def create_main_keyboard():
 def handle_start(message):
     chat_id = message.chat.id
     last_activity[chat_id] = datetime.now()
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(KeyboardButton("Вибрати напрямок"))
     bot.send_message(chat_id, "Натисніть 'Вибрати напрямок', щоб продовжити.", reply_markup=create_main_keyboard())
 
 # Хендлер для кнопки "Вибрати напрямок"
@@ -161,88 +182,265 @@ def handle_client_selection(call):
     user_state[chat_id]['client'] = selected_client
     bot.send_message(chat_id, f"Клієнт {selected_client} вибраний. Тепер завантажте фото.")
 
-# Хендлер для фото
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
+
+@bot.message_handler(content_types=['photo', 'media_group'])
+def handle_media_group(message):
     chat_id = message.chat.id
     state = user_state.get(chat_id, {})
-    last_activity[chat_id] = datetime.now()
 
+    # Перевіряємо, чи обрані напрямок, район і клієнт
     if 'region' not in state or 'district' not in state or 'client' not in state:
-        bot.send_message(chat_id, "Спочатку оберіть область, район та клієнта за допомогою кнопки 'Вибрати напрямок'.")
+        bot.send_message(chat_id, "Спочатку оберіть напрямок, район і клієнта за допомогою кнопки 'Вибрати напрямок'.")
         return
 
-    selected_region = state['region']
-    selected_district = state['district']
-    selected_client = state['client']
+    region = state['region']
+    district = state['district']
+    client = state['client']
 
-    # Створення папки для області, району та клієнта
-    folder_path = os.path.join(BASE_FOLDER, selected_region, selected_district, selected_client)
-    os.makedirs(folder_path, exist_ok=True)
-
-    # Завантаження фото
-    photo_id = message.photo[-1].file_id
-    file_info = bot.get_file(photo_id)
-    downloaded_file = bot.download_file(file_info.file_path)
-
-    # Додавання дати і часу до назви файлу
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    photo_name = f"{timestamp}.jpg"
-    photo_path = os.path.join(folder_path, photo_name)
-
-    # Збереження фото
-    with open(photo_path, 'wb') as photo_file:
-        photo_file.write(downloaded_file)
-
-    bot.send_message(chat_id, f"Фото збережено як {photo_name} у папці: {folder_path}")
-
-    
-# Хендлер для фото
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    chat_id = message.chat.id
-    state = user_state.get(chat_id, {})
-    last_activity[chat_id] = datetime.now()
-
-    if 'region' not in state or 'district' not in state or 'client' not in state:
-        bot.send_message(chat_id, "Спочатку оберіть область, район та клієнта за допомогою кнопки 'Вибрати напрямок'.")
-        return
-   
-    # Створення папки для користувача, клієнта та регіону
-    region = clean_folder_name(user_state[chat_id]['region'])
-    district = clean_folder_name(user_state[chat_id]['district'])
-    client = clean_folder_name(user_state[chat_id]['client'])
-
+    # Створення папки для збереження фото
     folder_path = os.path.join(BASE_FOLDER, region, district, client)
     os.makedirs(folder_path, exist_ok=True)
 
+    def generate_unique_filename(folder, base_name, extension):
+        """Генерує унікальне ім'я файлу, якщо файл уже існує."""
+        counter = 1
+        file_name = f"{base_name}{extension}"
+        while os.path.exists(os.path.join(folder, file_name)):
+            file_name = f"{base_name}_{counter}{extension}"
+            counter += 1
+        return file_name
+
+    # Обробка фото чи альбому
+    if message.content_type == 'media_group':
+        # Альбом фото
+        if len(message.photo) > 5:
+            bot.send_message(chat_id, "Можна завантажити не більше 5 фото за один раз.")
+            return
+
+        for index, media in enumerate(message.photo):
+            try:
+                photo_id = media.file_id
+                file_info = bot.get_file(photo_id)
+                downloaded_file = bot.download_file(file_info.file_path)
+
+                # Формуємо назву файлу
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                base_name = f"{timestamp}_{index + 1}"
+                unique_name = generate_unique_filename(folder_path, base_name, ".jpg")
+                photo_path = os.path.join(folder_path, unique_name)
+
+                # Зберігаємо файл
+                with open(photo_path, 'wb') as photo_file:
+                    photo_file.write(downloaded_file)
+
+                bot.send_message(chat_id, f"Фото {index + 1} збережено як {unique_name}.")
+            except Exception as e:
+                bot.send_message(chat_id, f"Помилка під час збереження фото: {str(e)}")
+    elif message.content_type == 'photo':
+        # Одне фото
+        try:
+            photo_id = message.photo[-1].file_id
+            file_info = bot.get_file(photo_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+
+            # Формуємо назву файлу
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            base_name = f"{timestamp}_single"
+            unique_name = generate_unique_filename(folder_path, base_name, ".jpg")
+            photo_path = os.path.join(folder_path, unique_name)
+
+            # Зберігаємо файл
+            with open(photo_path, 'wb') as photo_file:
+                photo_file.write(downloaded_file)
+
+            bot.send_message(chat_id, f"Фото збережено як {unique_name}.")
+        except Exception as e:
+            bot.send_message(chat_id, f"Помилка під час збереження фото: {str(e)}")
 
 
-    #      # Отримуємо ім'я користувача
-    username = message.from_user.username or "Без_імені"
-    full_name = f"{message.from_user.first_name or ''}_{message.from_user.last_name or ''}".strip().replace(' ', '_')
-    user_name_info = username if username else full_name  # Використовуємо username або повне ім'я
+
+# @bot.message_handler(content_types=['photo', 'media_group'])
+# def handle_media_group(message):
+#     chat_id = message.chat.id
+#     state = user_state.get(chat_id, {})
+
+#     # Перевіряємо, чи обрані напрямок, район і клієнт
+#     if 'region' not in state or 'district' not in state or 'client' not in state:
+#         bot.send_message(chat_id, "Спочатку оберіть напрямок, район і клієнта за допомогою кнопки 'Вибрати напрямок'.")
+#         return
+
+#     region = state['region']
+#     district = state['district']
+#     client = state['client']
+
+#     # Створення папки для збереження фото
+#     folder_path = os.path.join(BASE_FOLDER, region, district, client)
+#     os.makedirs(folder_path, exist_ok=True)
+
+#     # Обробка фото чи альбому
+#     if message.content_type == 'media_group':
+#         # Альбом фото
+#         if len(message.photo) > 5:
+#             bot.send_message(chat_id, "Можна завантажити не більше 5 фото за один альбом.")
+#             return
+
+#         for index, media in enumerate(message.photo):
+#             try:
+#                 photo_id = media.file_id
+#                 file_info = bot.get_file(photo_id)
+#                 downloaded_file = bot.download_file(file_info.file_path)
+
+#                 # Формуємо унікальну назву файлу
+#                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#                 photo_name = f"{timestamp}_{index + 1}.jpg"
+#                 photo_path = os.path.join(folder_path, photo_name)
+
+#                 # Зберігаємо файл
+#                 with open(photo_path, 'wb') as photo_file:
+#                     photo_file.write(downloaded_file)
+                
+#                 bot.send_message(chat_id, f"Фото {index + 1} збережено як {photo_name}.")
+#             except Exception as e:
+#                 bot.send_message(chat_id, f"Помилка під час збереження фото: {str(e)}")
+#     elif message.content_type == 'photo':
+#         # Одне фото
+#         try:
+#             photo_id = message.photo[-1].file_id
+#             file_info = bot.get_file(photo_id)
+#             downloaded_file = bot.download_file(file_info.file_path)
+
+#             # Формуємо унікальну назву файлу
+#             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#             photo_name = f"{timestamp}_single.jpg"
+#             photo_path = os.path.join(folder_path, photo_name)
+
+#             # Зберігаємо файл
+#             with open(photo_path, 'wb') as photo_file:
+#                 photo_file.write(downloaded_file)
+
+#             bot.send_message(chat_id, f"Фото збережено як {photo_name}.")
+#         except Exception as e:
+#             bot.send_message(chat_id, f"Помилка під час збереження фото: {str(e)}")
+
+
+# # Хендлер для фото
+# @bot.message_handler(content_types=['photo'])
+# def handle_photo(message):
+#     chat_id = message.chat.id
+#     state = user_state.get(chat_id, {})
+#     last_activity[chat_id] = datetime.now()
+
+#     if 'region' not in state or 'district' not in state or 'client' not in state:
+#         bot.send_message(chat_id, "Спочатку оберіть область, район та клієнта за допомогою кнопки 'Вибрати напрямок'.")
+#         return
+
+#     selected_region = state['region']
+#     selected_district = state['district']
+#     selected_client = state['client']
+
+#     # Створення папки для області, району та клієнта
+#     folder_path = os.path.join(BASE_FOLDER, selected_region, selected_district, selected_client)
+#     os.makedirs(folder_path, exist_ok=True)
+
+#     # Завантаження фото
+#     photo_id = message.photo[-1].file_id
+#     file_info = bot.get_file(photo_id)
+#     downloaded_file = bot.download_file(file_info.file_path)
+
+#     # Додавання дати і часу до назви файлу
+#     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#     photo_name = f"{timestamp}.jpg"
+#     photo_path = os.path.join(folder_path, photo_name)
+
+#     # Збереження фото
+#     with open(photo_path, 'wb') as photo_file:
+#         photo_file.write(downloaded_file)
+
+#     bot.send_message(chat_id, f"Фото збережено як {photo_name} у папці: {folder_path}")
+
+    
+# # Хендлер для фото
+# @bot.message_handler(content_types=['photo'])
+# def handle_photo(message):
+#     chat_id = message.chat.id
+#     state = user_state.get(chat_id, {})
+#     last_activity[chat_id] = datetime.now()
+
+#     if 'region' not in state or 'district' not in state or 'client' not in state:
+#         bot.send_message(chat_id, "Спочатку оберіть область, район та клієнта за допомогою кнопки 'Вибрати напрямок'.")
+#         return
    
-#     # Видаляємо недопустимі символи із імені
-    safe_user_name = ''.join(c for c in user_name_info if c.isalnum() or c in ('_', '-'))   
+#     # Створення папки для користувача, клієнта та регіону
+#     region = clean_folder_name(user_state[chat_id]['region'])
+#     district = clean_folder_name(user_state[chat_id]['district'])
+#     client = clean_folder_name(user_state[chat_id]['client'])
 
-    # Отримання фото
-    photo_id = message.photo[-1].file_id
-    file_info = bot.get_file(photo_id)
+#     folder_path = os.path.join(BASE_FOLDER, region, district, client)
+#     os.makedirs(folder_path, exist_ok=True)
+
+
+
+#     #      # Отримуємо ім'я користувача
+#     username = message.from_user.username or "Без_імені"
+#     full_name = f"{message.from_user.first_name or ''}_{message.from_user.last_name or ''}".strip().replace(' ', '_')
+#     user_name_info = username if username else full_name  # Використовуємо username або повне ім'я
+   
+# #     # Видаляємо недопустимі символи із імені
+#     safe_user_name = ''.join(c for c in user_name_info if c.isalnum() or c in ('_', '-'))   
+
+#     # Отримання фото
+#     photo_id = message.photo[-1].file_id
+#     file_info = bot.get_file(photo_id)
+#     downloaded_file = bot.download_file(file_info.file_path)
+    
+#       # Додавання дати і імені користувача до назви файлу
+#     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#     photo_name = f"{timestamp}_{safe_user_name}.jpg"
+#     photo_path = os.path.join(folder_path, photo_name)
+    
+#     # Збереження фото
+#     try:
+#         with open(photo_path, 'wb') as photo_file:
+#             photo_file.write(downloaded_file)
+#         bot.send_message(chat_id, f"Фото збережено як {photo_name} у папці: {folder_path}")
+#     except Exception as e:
+#         bot.send_message(chat_id, f"Сталася помилка при збереженні фото: {e}")
+
+# Хендлер для отримання відео
+@bot.message_handler(content_types=['video'])
+def handle_video(message):
+    chat_id = message.chat.id
+    state = user_state.get(chat_id, {})
+    
+    # Перевіряємо, чи обрані напрямок, район та клієнт
+    if 'region' not in state or 'district' not in state or 'client' not in state:
+        bot.send_message(chat_id, "Спочатку оберіть напрямок, район і клієнта за допомогою кнопки 'Вибрати напрямок'.")
+        return
+
+    region = state['region']
+    district = state['district']
+    client = state['client']
+    
+    # Створення папки для збереження відео
+    folder_path = os.path.join(BASE_FOLDER, region, district, client)
+    os.makedirs(folder_path, exist_ok=True)
+    
+    # Отримуємо інформацію про файл
+    video_id = message.video.file_id
+    file_info = bot.get_file(video_id)
     downloaded_file = bot.download_file(file_info.file_path)
-    
-      # Додавання дати і імені користувача до назви файлу
+
+    # Формуємо назву файлу
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    photo_name = f"{timestamp}_{safe_user_name}.jpg"
-    photo_path = os.path.join(folder_path, photo_name)
-    
-    # Збереження фото
-    try:
-        with open(photo_path, 'wb') as photo_file:
-            photo_file.write(downloaded_file)
-        bot.send_message(chat_id, f"Фото збережено як {photo_name} у папці: {folder_path}")
-    except Exception as e:
-        bot.send_message(chat_id, f"Сталася помилка при збереженні фото: {e}")
+    video_name = f"{timestamp}.mp4"
+    video_path = os.path.join(folder_path, video_name)
+
+    # Збереження відео
+    with open(video_path, 'wb') as video_file:
+        video_file.write(downloaded_file)
+
+    # Відправляємо повідомлення про успішне збереження
+    bot.send_message(chat_id, f"Відео збережено як {video_name} у папку: {folder_path}")
 
 def start_polling_with_reconnect():
     while True:
