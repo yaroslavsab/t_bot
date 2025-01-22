@@ -3,11 +3,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 import os
 import pandas as pd
 import re
-from telebot import apihelper
+from telebot import apihelper, types  
 import time 
 from datetime import datetime, timedelta
 import threading
-
+import math
 
 # Налаштування таймауту для всіх запитів
 apihelper.CONNECT_TIMEOUT = 30  # Таймаут підключення
@@ -104,7 +104,7 @@ def check_inactivity():
         time.sleep(60)  # Перевіряти кожну хвилину
 
 # Запустити перевірку бездіяльності в окремому потоці
-import time
+
 threading.Thread(target=check_inactivity, daemon=True).start()
 
 # Функція для санітизації callback_data
@@ -166,11 +166,52 @@ def handle_district_selection(call):
     user_state[chat_id]['district'] = selected_district
     selected_region = user_state[chat_id]['region']
 
-    # Показати список клієнтів
+    # # Показати список клієнтів
+    # markup = InlineKeyboardMarkup()
+    # for client in CLIENTS[selected_region][selected_district]:
+    #     markup.add(InlineKeyboardButton(client, callback_data=f"client:{client}"))
+    # bot.send_message(chat_id, f"Район {selected_district} вибраний. Оберіть клієнта:", reply_markup=markup)
+
+ # Показати першу сторінку клієнтів
+    clients = CLIENTS[selected_region][selected_district]
+    user_state[chat_id]['clients'] = clients  # Зберігаємо список клієнтів
+    user_state[chat_id]['page'] = 0  # Початкова сторінка
+    show_clients_page(chat_id, clients, 0)
+
+# Функція для відображення клієнтів на певній сторінці
+def show_clients_page(chat_id, clients, page):
+    items_per_page = 15  # Кількість клієнтів на одній сторінці
+    start = page * items_per_page
+    end = start + items_per_page
+    clients_page = clients[start:end]
+
     markup = InlineKeyboardMarkup()
-    for client in CLIENTS[selected_region][selected_district]:
+    for client in clients_page:
         markup.add(InlineKeyboardButton(client, callback_data=f"client:{client}"))
-    bot.send_message(chat_id, f"Район {selected_district} вибраний. Оберіть клієнта:", reply_markup=markup)
+
+    # Додавання кнопок навігації
+    if page > 0:
+        markup.add(InlineKeyboardButton("⬅️ Попередня", callback_data=f"page:{page - 1}"))
+    if end < len(clients):
+        markup.add(InlineKeyboardButton("➡️ Наступна", callback_data=f"page:{page + 1}"))
+
+    bot.send_message(chat_id, f"Список клієнтів (сторінка {page + 1}):", reply_markup=markup)
+
+# Обробка зміни сторінки
+@bot.callback_query_handler(func=lambda call: call.data.startswith("page:"))
+def handle_page_change(call):
+    chat_id = call.message.chat.id
+    page = int(call.data.split(":")[1])
+    last_activity[chat_id] = datetime.now()
+
+    clients = user_state[chat_id].get('clients')
+    if clients is not None:
+        user_state[chat_id]['page'] = page
+        # bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+        #                       text=f"Список клієнтів (сторінка {page + 1}):")
+        show_clients_page(chat_id, clients, page)
+    else:
+        bot.answer_callback_query(call.id, "Помилка: список клієнтів не знайдено.")
 
 # Обробка вибору клієнта
 @bot.callback_query_handler(func=lambda call: call.data.startswith("client:"))
@@ -179,8 +220,36 @@ def handle_client_selection(call):
     selected_client = call.data.split(":")[1]
     last_activity[chat_id] = datetime.now()
 
-    user_state[chat_id]['client'] = selected_client
-    bot.send_message(chat_id, f"Клієнт {selected_client} вибраний. Тепер завантажте фото.")
+    bot.send_message(chat_id, f"Клієнт {selected_client} вибраний. Тепер завантажте фото або відео.")
+
+
+# # Обробка вибору клієнта
+# @bot.callback_query_handler(func=lambda call: call.data.startswith("client:"))
+# def handle_client_selection(call):
+#     chat_id = call.message.chat.id
+#     selected_client = call.data.split(":")[1]
+#     last_activity[chat_id] = datetime.now()
+
+#     user_state[chat_id]['client'] = selected_client
+#     bot.send_message(chat_id, f"Клієнт {selected_client} вибраний. Тепер завантажте фото або відео.")
+
+
+# # Обробка вибору клієнта з пагінацією
+# @bot.callback_query_handler(func=lambda call: call.data.startswith("client:"))
+# def handle_client_selection(call):
+#     data = call.data.split(":")
+#     chat_id = call.message.chat.id
+#     if len(data) == 3 and data[1] == "prev" or data[1] == "next":
+#         # Пагінація
+#         district = data[2]
+#         page = int(data[3])
+#         keyboard = create_paginated_keyboard(clients[district], page, f"client:{district}")
+#         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=keyboard)
+#     else:
+#         # Вибір клієнта
+#         selected_client = data[1]
+#         bot.send_message(call.message.chat.id, f"Ви обрали клієнта: {selected_client}")
+
 
 
 @bot.message_handler(content_types=['photo', 'media_group'])
